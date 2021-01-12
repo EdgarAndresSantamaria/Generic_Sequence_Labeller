@@ -1,0 +1,466 @@
+# coding=utf-8
+# Copyright 2020 The HuggingFace Team All rights reserved.
+# Modifications copyright (C) 2021 Edgar Andrés Santamaría All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+#
+# Adapted and modified by Edgar Andrés Santamaría for easy use purposes.
+# Any issue into eandres011@ikasle.ehu.eus
+#
+# Added loading modules for multiple data sources.
+# Generic implementation for tokenize_and_align method.
+# Changed the prediction output.
+# Coding and styling minor changes.
+# documented code for understandability
+#
+#
+"""
+Fine-tuning the library models for token classification.
+"""
+# You can also adapt this script on your own token classification task and datasets. Pointers for this are left as
+# comments.
+
+import logging
+import os
+import sys
+from dataclasses import dataclass, field
+from typing import Optional
+import json
+import numpy as np
+from datasets import ClassLabel, load_dataset
+from seqeval.metrics import accuracy_score, f1_score, precision_score, recall_score
+
+import transformers
+from transformers import (
+    AutoConfig,
+    AutoModelForTokenClassification,
+    AutoTokenizer,
+    DataCollatorForTokenClassification,
+    HfArgumentParser,
+    Trainer,
+    TrainingArguments,
+    set_seed,
+)
+from transformers.trainer_utils import is_main_process
+logger = logging.getLogger(__name__)
+
+@dataclass
+class ModelArguments:
+    """
+    Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
+    """
+
+    model_name_or_path: str = field(
+        metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
+    )
+    config_name: Optional[str] = field(
+        default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
+    )
+    tokenizer_name: Optional[str] = field(
+        default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
+    )
+    cache_dir: Optional[str] = field(
+        default=None,
+        metadata={"help": "Where do you want to store the pretrained models downloaded from huggingface.co"},
+    )
+
+
+@dataclass
+class DataTrainingArguments:
+    """
+    Arguments pertaining to what data we are going to input our model for training and eval.
+    """
+
+    task_name: Optional[str] = field(default="ner", metadata={"help": "The name of the task (ner, pos...)."})
+    dataset_name: Optional[str] = field(
+        default=None, metadata={"help": "The name of the dataset to use (via the datasets library)."}
+    )
+    dataset_json: Optional[bool] = field(
+        default=False, metadata={"help": "The Dataset is loader from json."}
+    )
+    dataset_txt: Optional[bool] = field(
+        default=False, metadata={"help": "The Dataset is loader from txt."}
+    )
+    dataset_config_name: Optional[str] = field(
+        default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
+    )
+    train_file: Optional[str] = field(
+        default=None, metadata={"help": "The input training data file (a csv or JSON file)."}
+    )
+    validation_file: Optional[str] = field(
+        default=None,
+        metadata={"help": "An optional input evaluation data file to evaluate on (a csv or JSON file)."},
+    )
+    max_seq_length: int = field(
+        default=128,
+        metadata={
+            "help": "The maximum total input sequence length after tokenization. Sequences longer "
+                    "than this will be truncated, sequences shorter will be padded."
+        },
+    )
+    test_file: Optional[str] = field(
+        default=None,
+        metadata={"help": "An optional input test data file to predict on (a csv or JSON file)."},
+    )
+    overwrite_cache: bool = field(
+        default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
+    )
+    preprocessing_num_workers: Optional[int] = field(
+        default=None,
+        metadata={"help": "The number of processes to use for the preprocessing."},
+    )
+    pad_to_max_length: bool = field(
+        default=False,
+        metadata={
+            "help": "Whether to pad all samples to model maximum sentence length. "
+            "If False, will pad the samples dynamically when batching to the maximum length in the batch. More "
+            "efficient on GPU but very bad for TPU."
+        },
+    )
+    label_all_tokens: bool = field(
+        default=False,
+        metadata={
+            "help": "Whether to put the label for one word on all tokens of generated by that word or just on the "
+            "one (in which case the other tokens will have a padding index)."
+        },
+    )
+
+    def __post_init__(self):
+        if self.dataset_name is None and self.train_file is None and self.validation_file is None:
+            raise ValueError("Need either a dataset name or a training/validation file.")
+        else:
+            if self.train_file is not None:
+                extension = self.train_file.split(".")[-1]
+                assert extension in ["csv", "json", "txt"], "`train_file` should be a csv, a json file or txt."
+            if self.validation_file is not None:
+                extension = self.validation_file.split(".")[-1]
+                assert extension in ["csv", "json", "txt"], "`validation_file` should be a csv, a json file or a txt."
+        self.task_name = self.task_name.lower()
+
+
+def main():
+    # See all possible arguments in src/transformers/training_args.py
+    # or by passing the --help flag to this script.
+    # We now keep distinct sets of args, for a cleaner separation of concerns.
+
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+    if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
+        # If we pass only one argument to the script and it's the path to a json file,
+        # let's parse it to get our arguments.
+        model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
+
+    else:
+        model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+
+        # logging info ....
+
+    if (
+        os.path.exists(training_args.output_dir)
+        and os.listdir(training_args.output_dir)
+        and training_args.do_train
+        and not training_args.overwrite_output_dir
+    ):
+        raise ValueError(
+            f"Output directory ({training_args.output_dir}) already exists and is not empty."
+            "Use --overwrite_output_dir to overcome."
+        )
+
+    # Setup logging
+    logging.basicConfig(
+        format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        level=logging.INFO if is_main_process(training_args.local_rank) else logging.WARN,
+    )
+
+    # Log on each process the small summary:
+    logger.warning(
+        f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}"
+        + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
+    )
+    # Set the verbosity to info of the Transformers logger (on main process only):
+    if is_main_process(training_args.local_rank):
+        transformers.utils.logging.set_verbosity_info()
+        transformers.utils.logging.enable_default_handler()
+        transformers.utils.logging.enable_explicit_format()
+    logger.info("Training/evaluation parameters %s", training_args)
+
+    # Set seed before initializing model.
+    set_seed(training_args.seed)
+
+
+    # Get the datasets: you can either provide your own CSV/JSON/TXT training and evaluation files (see below)
+    # or just provide the name of one of the public datasets available on the hub at https://huggingface.co/datasets/
+    # (the dataset will be downloaded automatically from the datasets Hub).
+    #
+    # For CSV/JSON files, this script will use the column called 'text' or the first column if no column called
+    # 'text' is found. You can easily tweak this behavior (see below).
+    #
+    # In distributed training, the load_dataset function guarantee that only one local process can concurrently
+    # download the dataset.
+
+    def load_fromtxt(file_path):
+        guid_index = 1
+        examples = []
+        with open(file_path, encoding="utf-8") as f:
+            words = []
+            labels = []
+            for line in f:
+                if line.startswith("-DOCSTART-") or line == "" or line == "\n" or line == " \n":
+                    if words:
+                        examples.append({"tokens": words, "labels": labels})
+                        guid_index += 1
+                        words = []
+                        labels = []
+                else:
+                    splits = line.split(" ")
+                    if len(splits) > 1:
+                        words.append(splits[0])
+                        labels.append(splits[-1].replace("\n", ""))
+                    else:
+                        # Examples could have no label for mode = "test"
+                        splits = splits[0].split("\n")
+                        words.append(splits[0])
+                        labels.append("O")
+        return {"data":examples}
+
+    def load_json():
+        data_files = {}
+        if data_args.train_file is not None:
+            data_files["train"] = data_args.train_file
+        if data_args.validation_file is not None:
+            data_files["validation"] = data_args.validation_file
+        if data_args.test_file is not None:
+            data_files["test"] = data_args.test_file
+        type = "json"
+        return load_dataset(type, data_files=data_files, cache_dir=dir, field='data')
+
+    # temporal feature saving dir
+    dir = data_args.train_file.split(".")[0]
+    if data_args.dataset_name is not None:
+        # Downloading and loading a dataset from the hub.
+        datasets = load_dataset(data_args.dataset_name, cache_dir=dir)
+    elif data_args.dataset_json:
+        datasets = load_json()
+    elif data_args.dataset_txt:
+        if data_args.train_file is not None:
+            with open(data_args.train_file.split(".")[0] + ".json", 'w') as outfile:
+                json.dump(load_fromtxt(data_args.train_file), outfile)
+            data_args.train_file = data_args.train_file.split(".")[0] + ".json"
+        if data_args.validation_file is not None:
+            with open(data_args.validation_file.split(".")[0] + ".json", 'w') as outfile:
+                json.dump(load_fromtxt(data_args.validation_file), outfile)
+            data_args.validation_file = data_args.validation_file.split(".")[0] + ".json"
+        if data_args.test_file is not None:
+            with open(data_args.test_file.split(".")[0] + ".json", 'w') as outfile:
+                json.dump(load_fromtxt(data_args.test_file), outfile)
+            data_args.test_file = data_args.test_file.split(".")[0] + ".json"
+        datasets = load_json()
+    # See more about loading any type of standard or custom dataset (from files, python dict, pandas DataFrame, etc) at
+    # https://huggingface.co/docs/datasets/loading_datasets.html.
+
+    if training_args.do_train:
+        column_names = datasets["train"].column_names
+        features = datasets["train"].features
+    else:
+        column_names = datasets["validation"].column_names
+        features = datasets["validation"].features
+    text_column_name = "tokens" if "tokens" in column_names else column_names[0]
+    label_column_name = (
+        f"{data_args.task_name}_tags" if f"{data_args.task_name}_tags" in column_names else column_names[1]
+    )
+
+    # In the event the labels are not a `Sequence[ClassLabel]`, we will need to go through the dataset to get the
+    # unique labels.
+    def get_label_list(labels):
+        unique_labels = set()
+        for label in labels:
+            unique_labels = unique_labels | set(label)
+        label_list = list(unique_labels)
+        label_list.sort()
+        return label_list
+
+    if isinstance(features[label_column_name].feature, ClassLabel):
+        label_list = features[label_column_name].feature.names
+        # No need to convert the labels since they are already ints.
+        label_to_id = {i: i for i in range(len(label_list))}
+    else:
+        label_list = get_label_list(datasets["train"][label_column_name])
+        label_to_id = {l: i for i, l in enumerate(label_list)}
+    num_labels = len(label_list)
+
+    # Load pretrained model and tokenizer
+    #
+    # Distributed training:
+    # The .from_pretrained methods guarantee that only one local process can concurrently
+    # download model & vocab.
+    config = AutoConfig.from_pretrained(
+        model_args.config_name if model_args.config_name else model_args.model_name_or_path,
+        num_labels=num_labels,
+        finetuning_task=data_args.task_name,
+        cache_dir=model_args.cache_dir,
+    )
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
+        cache_dir=model_args.cache_dir,
+        use_fast=True,
+    )
+    model = AutoModelForTokenClassification.from_pretrained(
+        model_args.model_name_or_path,
+        from_tf=bool(".ckpt" in model_args.model_name_or_path),
+        config=config,
+        cache_dir=model_args.cache_dir,
+    )
+
+    # Preprocessing the dataset
+    # Padding strategy
+    padding = "max_length" if data_args.pad_to_max_length else False
+
+    # Tokenize all texts and align the labels with them.
+    def tokenize_and_align(examples):
+        tokenized_inputs = tokenizer(
+            examples[text_column_name],
+            padding=padding,
+            truncation=True,
+            # We use this argument because the texts in our dataset are lists of words (with a label for each word).
+            is_split_into_words=True,
+            return_offsets_mapping=True
+        )
+
+        # assign labels to first BPE chunk, other pieces (special, additional sub strings ...) keep like -100 (ignore index)
+        label_map = examples[label_column_name]
+        labels = []
+        for i, sentence in enumerate(examples[text_column_name]):
+            label_ids = [-100]
+            tmp_tokens = []
+            for j, token in enumerate(sentence):
+                labels_input = label_map[i]
+                tokenized_input = tokenizer(token, padding=True, add_special_tokens=False)
+                splited_word = len(tokenized_input['input_ids'])
+                if splited_word > 0: label_ids += [label_to_id[labels_input[j]]] + [-100] * (splited_word - 1)
+            label_ids += [-100]
+            labels.append(label_ids)
+
+        tokenized_inputs["labels"] = labels
+        return tokenized_inputs
+
+    tokenized_datasets = datasets.map(
+        tokenize_and_align,
+        batched=True,
+        num_proc=data_args.preprocessing_num_workers,
+        load_from_cache_file=not data_args.overwrite_cache,
+    )
+
+    # Data collator
+    data_collator = DataCollatorForTokenClassification(tokenizer)
+
+    # Metrics
+    def compute_metrics(p):
+        predictions, labels = p
+        predictions = np.argmax(predictions, axis=2)
+
+        # Remove ignored index (special tokens)
+        true_predictions = [
+            [label_list[p] for (p, l) in zip(prediction, label) if l != -100]
+            for prediction, label in zip(predictions, labels)
+        ]
+        true_labels = [
+            [label_list[l] for (p, l) in zip(prediction, label) if l != -100]
+            for prediction, label in zip(predictions, labels)
+        ]
+
+        return {
+            "accuracy_score": accuracy_score(true_labels, true_predictions),
+            "precision": precision_score(true_labels, true_predictions),
+            "recall": recall_score(true_labels, true_predictions),
+            "f1": f1_score(true_labels, true_predictions),
+        }
+
+    # Initialize our Trainer
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=tokenized_datasets["train"] if training_args.do_train else None,
+        eval_dataset=tokenized_datasets["validation"] if training_args.do_eval else None,
+        tokenizer=tokenizer,
+        data_collator=data_collator,
+        compute_metrics=compute_metrics,
+    )
+
+    # Training
+    if training_args.do_train:
+        trainer.train(
+            model_path=model_args.model_name_or_path if os.path.isdir(model_args.model_name_or_path) else None
+        )
+        trainer.save_model()  # Saves the tokenizer too for easy upload
+
+    # Evaluation
+    results = {}
+    if training_args.do_eval:
+        logger.info("*** Evaluate ***")
+
+        results = trainer.evaluate()
+
+        output_eval_file = os.path.join(training_args.output_dir, "eval_results_ner.txt")
+        if trainer.is_world_process_zero():
+            with open(output_eval_file, "w") as writer:
+                logger.info("***** Eval results *****")
+                for key, value in results.items():
+                    logger.info(f"  {key} = {value}")
+                    writer.write(f"{key} = {value}\n")
+
+    # Predict
+    if training_args.do_predict:
+        logger.info("*** Predict ***")
+
+        test_dataset = tokenized_datasets["test"]
+        predictions, labels, metrics = trainer.predict(test_dataset)
+        predictions = np.argmax(predictions, axis=2)
+
+        # Remove ignored index (special tokens)
+        true_predictions = [
+            [label_list[p] for (p, l) in zip(prediction, label) if l != -100]
+            for prediction, label in zip(predictions, labels)
+        ]
+
+        output_test_results_file = os.path.join(training_args.output_dir, "test_results.txt")
+        if trainer.is_world_process_zero():
+            with open(output_test_results_file, "w") as writer:
+                for key, value in metrics.items():
+                    logger.info(f"  {key} = {value}")
+                    writer.write(f"{key} = {value}\n")
+
+        # Save predictions
+        output_test_predictions_file = os.path.join(training_args.output_dir, "test_predictions.txt")
+        if trainer.is_world_process_zero():
+            with open(output_test_predictions_file, "w", encoding="utf-8") as writer:
+                for i, example in enumerate(datasets["test"]):
+                    tokens = example["tokens"]
+                    predictions = true_predictions[i]
+                    zipped =  zip(tokens, predictions)
+                    for elem in zipped:
+                        try:
+                            writer.write(" ".join(elem) + "\n")
+                        except Exception as e: print(e)
+                    writer.write("\n")
+
+    return results
+
+
+def _mp_fn(index):
+    # For xla_spawn (TPUs)
+    main()
+
+
+if __name__ == "__main__":
+    main()

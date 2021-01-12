@@ -20,6 +20,11 @@ This framework is deployable as module for bigger structures.
 
 This framework is made for developers either researchers, notice some performance study in the below papper.
 
+This framework is scalable due supports cross-lingual support and transfer-learning.
+
+This framework is deep due to extensive Neural Networks usage.
+
+Feel free to try any kind of seq2seq problem =D 
 
 For any issue, idea or help pleaase contact eandres011@ikasle.ehu.eus
 
@@ -74,6 +79,7 @@ dolor B-Concept
 
 ...
 ```
+
 For test.txt could be provided with or without label column.
 The framework internally converts the provided (.txt) formats into compatible (.json) formats, this allow supporting multiple formats.
 

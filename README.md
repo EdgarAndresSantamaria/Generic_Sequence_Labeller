@@ -18,8 +18,8 @@ This framework is democratic due the possibility to use high performance pre-tra
 
 This framework is deployable as module for bigger structures.
 
-This framework is made for developers either researchers, notice some performance study in the following work:
-https://addi.ehu.eus/handle/10810/48623
+This framework is made for developers either researchers, notice some performance study in the below papper.
+
 
 For any issue, idea or help pleaase contact eandres011@ikasle.ehu.eus
 
@@ -318,5 +318,15 @@ Notice that all the options are interchangeable and well designed to interact in
     "do_train": true,
     "do_eval": true,
     "do_predict": true
+}
+```
+## Citation
+
+We first time presented the framework on [paper](https://addi.ehu.eus/handle/10810/48623) you can cite for the 🤗 Transformers library:
+```bibtex
+@article{santamaria2020end,
+  title={End to end approach for i2b2 2012 challenge based on Cross-lingual models},
+  author={Santamar{\'\i}a, Edgar Andr{\'e}s},
+  year={2020}
 }
 ```

@@ -321,8 +321,7 @@ Notice that all the options are interchangeable and well designed to interact in
 }
 ```
 ## Citation
-
-We first time presented the framework on [paper](https://addi.ehu.eus/handle/10810/48623) you can cite for the 🤗 Transformers library:
+We first time presented the framework on [paper](https://addi.ehu.eus/handle/10810/48623):
 ```bibtex
 @article{santamaria2020end,
   title={End to end approach for i2b2 2012 challenge based on Cross-lingual models},

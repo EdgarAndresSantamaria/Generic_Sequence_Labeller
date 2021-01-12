@@ -84,7 +84,7 @@ Files (.json) format:
 {"data": 
 [
 {"tokens": ["Masaje", "suave", "sobre", "el", "musculo", "."], "labels": ["B-Action", "B-Concept", "O", "O", "B-Concept", "O"]},
-... 
+"..." 
 ]
 }
 
@@ -96,22 +96,20 @@ Instead of passing all parameters via commandline arguments, the `run.py` script
 
 ```json
 {
-    ''' Arguments ''' 
     "model_name_or_path": "str = Path to pretrained model or model identifier from huggingface.co/models",
     "config_name": "Optional[str] = Pretrained config name or path if not the same as model_name",
     "tokenizer_name": "Optional[str] = Pretrained tokenizer name or path if not the same as model_name",
     "use_fast": "bool = Set this flag to use fast tokenization.",
     "cache_dir": "Optional[str] = Where do you want to store the pretrained models downloaded from s3",
   
-    '''Data handling''',
+
     "dataset_txt": "bool = Indicates that entrance end with .txt",
     "dataset_json": "bool = Indicates that entrance end with .json",
     "train_file": "path to train file , must fullfill the format specified",
     "validation_file": "path to dev file , must fullfill the format specified",
     "test_file": "path to test file , must fullfill the format specified",
-    "dataset_name": "automatically loads the desired dataset (without further config required) check -> https://huggingface.co/nlp/viewer/"
-    
-    ''' Training  ''' 
+    "dataset_name": "automatically loads the desired dataset (without further config required) check -> https://huggingface.co/nlp/viewer/",
+  
     "max_seq_length": "int = The maximum total input sequence length after tokenization. Sequences longer than this will be truncated, sequences shorter will be padded.",
     "overwrite_cache": "bool = Overwrite the cached training and evaluation sets",
     "num_train_epochs": "int = The maximum total Epochs to train.",
@@ -124,9 +122,9 @@ Instead of passing all parameters via commandline arguments, the `run.py` script
     "do_eval": "bool = if we want to evaluate",
     "do_predict": "bool = if we want to predict",
     "load_best_model_at_end" : "bool = checks the best checkpoint saved and retrieves it (specifies the epoch)",
-    "metric_for_best_model": "str = metric to compare evaluation (loss by default) :'loss','f1','accuracy_score','precision' or 'racall',
+    "metric_for_best_model": "str = metric to compare evaluation (loss by default) :'loss','f1','accuracy_score','precision' or 'racall'",
     "evaluation_strategy":"str = strategy to evaluate the mode (no by default): 'no' or 'steps' ",
-    "eval_steps": "int = Steps until perform evaluation (only if 'evaluation_strategy' = 'steps').",
+    "eval_steps": "int = Steps until perform evaluation (only if 'evaluation_strategy' = 'steps')."
 }
 ```
 For example, we could compose the following experiment:

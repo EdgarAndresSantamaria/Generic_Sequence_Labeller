@@ -2,7 +2,7 @@
 
 Based on the scripts [`run_ner.py`](https://github.com/huggingface/transformers/blob/master/examples/token-classification/run_ner.py) 
 
-Here we propose the generic tool `generic_sequence_labeller.py ` ready to use for Seequence labelling purposes.
+Here we propose the generic tool `generic_sequence_labeller.py ` ready to use for any Sequence labelling task.
 
 This framework supports high performance: CPU, GPU or GPU distributed learning.
 
